@@ -14,31 +14,7 @@ admin.initializeApp({
   databaseURL: 'https://salescampaignkl.firebaseio.com'
 })
 
-// // Create and Deploy Your First Cloud Functions
-// // https://firebase.google.com/docs/functions/write-firebase-functions
-//
-// exports.helloWorld = functions.https.onRequest((request, response) => {
-//   functions.logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
-
-/* exports.testChannelList = functions.https.onCall((data, context) => {
-  const region = data.region
-  return admin.database().ref(`region/${region}`).on('value', function (snapshot) {
-    const channelList = []
-    snapshot.forEach(function (childSnapshot) {
-      channelList.push({
-        value: childSnapshot.key,
-        label: childSnapshot.val().name
-      })
-    })
-    return { response: { code: 200, message: 'berhasil' }, data: channelList }
-  }, function (errorObject) {
-    console.log('The read failed: ' + errorObject.code)
-    throw new functions.https.HttpsError('invalid-argument', 'The function must be called with ' +
-    'one arguments "text" containing the message text to add.')
-  })
-}) */
+// SignUp Page Function
 
 exports.getChannelList = functions.https.onRequest((request, response) => {
   const body = request.body
@@ -62,58 +38,123 @@ exports.getChannelList = functions.https.onRequest((request, response) => {
   })
 })
 
-exports.addNewForm = functions.https.onRequest((request, response) => {
-  const body = request.body
+// Sales Form Function
 
-  const uid = body.data.useruid
-  const inputdata = body.data.inputdata
+exports.addNewForm = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
+
+  const uid = context.auth.uid
+  const inputData = data.input_data
+
+  // ISO Date Submit time (Server)
   const submitTime = new Date(Date.now())
 
-  admin.firestore().collection('user-data').doc(uid).get()
-    .then(val => {
-      const salesname = val.data().name
-      const salesid = val.data().id
-      const salesregion = val.data().region
-      const saleschannel = val.data().channel
+  return admin.firestore().collection('user_data').doc(uid).get()
+    .then(salesDataCollection => {
+      const salesDataValue = salesDataCollection.data()
+      // get val 1 by 1
+      const salesName = salesDataValue.name
+      const salesNIP = salesDataValue.nip
+      const salesRegion = salesDataValue.region
+      const salesChannel = salesDataValue.channel
 
-      const generateId = `${submitTime.toISOString()}${salesid}`
+      const generateId = `${submitTime.getTime()}${salesNIP}`
 
       const bookingForm = {
-        ...inputdata,
-        id: generateId,
-        start: new Date(inputdata.start),
-        end: new Date(inputdata.end),
-        createddate: submitTime,
-        isverified: 'waiting',
-        isexecuted: 'waiting',
-        salesname,
-        salesid,
-        salesregion,
-        saleschannel
+        ...inputData,
+        _id: generateId,
+        start_time: new Date(inputData.start_time),
+        end_time: new Date(inputData.end_time),
+        created_at: submitTime,
+        verified: 'waiting',
+        executed: 'waiting',
+        sales_name: salesName,
+        sales_region: salesRegion,
+        sales_channel: salesChannel
       }
-
-      // console.log(bookingForm);
-      return admin.firestore().collection('user-data').doc(`${uid}/schedule/${submitTime.toISOString()}${salesid}`).set(bookingForm)
+      return admin.firestore().collection('user_data').doc(`${uid}/schedule/${generateId}`).set(bookingForm)
     })
     .then(() => {
       return testMessage(messageList('new'))
     }).then(() => {
-      response.send({
-        response: { code: 200, message: 'berhasil' }, data: 'success'
-      })
+      return 'Add Form Success'
     })
-    .catch(err => {
-      console.log('Error getting documents', err)
-      response.status(500).send(err)
+    .catch(error => {
+      console.log('Error getting documents', error)
+      // Throwing an HttpsError so that the client gets the error details.
+      throw new functions.https.HttpsError('invalid-argument', 'the function error')
     })
 })
 
-exports.getWaitingForm = functions.https.onRequest((request, response) => {
-  const body = request.body
+exports.getSalesFormRequest = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
+  const uid = context.auth.uid
 
-  const uid = body.data.useruid
+  return admin.firestore().doc(`user_data/${uid}`).collection('schedule').orderBy('start_time').get()
+    .then(querySnapshot => {
+      const salesSchedule = []
 
-  admin.firestore().collection('user-data').doc(uid).get()
+      querySnapshot.forEach(documentSnapshot => {
+        const data = documentSnapshot.data()
+        salesSchedule.push({
+          sales_name: data.sales_name,
+          customer_name: data.customer_name,
+          customer_email: data.customer_email,
+          customer_handphone: data.customer_handphone,
+          conversation_type: data.conversation_type,
+          _id: data._id,
+          // time convert to string due to unknown on frontend
+          start_time: data.start_time.toDate().toISOString(),
+          end_time: data.end_time.toDate().toISOString(),
+          verified: data.verified,
+          executed: data.executed
+        })
+      })
+      return salesSchedule
+    }).catch(error => {
+      console.log(error)
+      throw new functions.https.HttpsError('invalid-argument', 'the function error')
+    })
+})
+
+exports.getFormDetail = functions.https.onCall((data, context) => {
+  const formId = data.formId
+
+  return admin.firestore().collectionGroup('schedule').where('_id', '==', formId).get()
+    .then(querySnapshot => {
+      let formDetailResponse = []
+      if (querySnapshot.size > 1) {
+        throw new functions.https.HttpsError('invalid-argument', 'multiple Form is Found')
+      } else {
+        querySnapshot.forEach(documentSnapshot => {
+          formDetailResponse = {
+            ...documentSnapshot.data(),
+            start_time: documentSnapshot.data().start_time.toDate().toISOString(),
+            end_time: documentSnapshot.data().end_time.toDate().toISOString()
+          }
+        })
+        return formDetailResponse
+      }
+    }).catch((error) => {
+      console.log(error)
+      throw new functions.https.HttpsError('invalid-argument', 'Failed to receive Data')
+    })
+})
+
+// on progress
+
+exports.getWaitingForm = functions.https.onCall((data, context) => {
+  const uid = context.auth.uid
+
+  return admin.firestore().collection('user_data').doc(uid).get()
     .then(documentSnapshot => {
       // (documentSnapshot.data().name)
       const productname = documentSnapshot.data().name
@@ -127,89 +168,63 @@ exports.getWaitingForm = functions.https.onRequest((request, response) => {
       querySnapshot.forEach(documentSnapshot => {
         const data = documentSnapshot.data()
         confirmationData.push({
-          salesname: data.salesname,
-          customername: data.customername,
-          customeremail: data.customeremail,
-          customerhandphone: data.customerhandphone,
-          id: data.id,
-          start: data.start.toDate(),
-          end: data.end.toDate()
+          company_name: data.company_name,
+          sales_name: data.sales_name,
+          customer_name: data.customer_name,
+          customer_email: data.customer_email,
+          customer_handphone: data.customer_handphone,
+          _id: data._id,
+          start_time: data.start_time.toDate().toISOString(),
+          end_time: data.end_time.toDate().toISOString(),
+          verified: data.verified,
+          executed: data.executed
         })
       })
 
-      response.send({
-        response: { code: 200, message: 'berhasil' }, data: confirmationData
-      })
+      return confirmationData
     }).catch(err => {
       console.log(err)
-      response.status(500).send(err)
+      throw new functions.https.HttpsError('invalid-argument', 'the function error')
     })
 })
 
-exports.getFormDetail = functions.https.onRequest((request, response) => {
-  const body = request.body
+// exports.getWaitingForm = functions.https.onRequest((request, response) => {
+//   const body = request.body
 
-  const formId = body.data.formId
-  admin.firestore().collectionGroup('schedule').where('id', '==', formId).get()
-    .then(querySnapshot => {
-      // querySnapshot.forEach(documentSnapshot => {
-      //   console.log(documentSnapshot.data())
-      // })
-      let data = []
-      if (querySnapshot.size > 1) {
-        // console.log('snapshot too much')
-        response.status(500).send('kelebihan')
-      } else {
-        querySnapshot.forEach(documentSnapshot => {
-          // console.log(documentSnapshot.data())
-          data = {
-            ...documentSnapshot.data(),
-            start: documentSnapshot.data().start.toDate(),
-            end: documentSnapshot.data().end.toDate()
-          }
-        })
-        response.send({
-          response: { code: 200, message: 'berhasil' }, data
-        })
-      }
-    }).catch((err) => {
-      console.log(err)
-      response.status(500).send(err)
-    }
-    )
-})
+//   const uid = body.data.useruid
 
-exports.getSalesFormRequest = functions.https.onRequest((request, response) => {
-  const body = request.body
+//   admin.firestore().collection('user-data').doc(uid).get()
+//     .then(documentSnapshot => {
+//       // (documentSnapshot.data().name)
+//       const productname = documentSnapshot.data().name
 
-  const uid = body.data.useruid
+//       return admin.firestore().collectionGroup('schedule')
+//         .where('producthandler', '==', productname).where('isverified', '==', 'waiting').orderBy('start').get()
+//     })
+//     .then(querySnapshot => {
+//       const confirmationData = []
 
-  admin.firestore().doc(`user-data/${uid}`).collection('schedule').orderBy('start').get()
-    .then(querySnapshot => {
-      const salesSchedule = []
+//       querySnapshot.forEach(documentSnapshot => {
+//         const data = documentSnapshot.data()
+//         confirmationData.push({
+//           salesname: data.salesname,
+//           customername: data.customername,
+//           customeremail: data.customeremail,
+//           customerhandphone: data.customerhandphone,
+//           id: data.id,
+//           start: data.start.toDate(),
+//           end: data.end.toDate()
+//         })
+//       })
 
-      querySnapshot.forEach(documentSnapshot => {
-        const data = documentSnapshot.data()
-        salesSchedule.push({
-          salesname: data.salesname,
-          customername: data.customername,
-          customeremail: data.customeremail,
-          customerhandphone: data.customerhandphone,
-          conversationtype: data.conversationtype,
-          id: data.id,
-          start: data.start.toDate(),
-          end: data.end.toDate(),
-          isverified: data.isverified
-        })
-      })
-      response.send({
-        response: { code: 200, message: 'berhasil' }, data: salesSchedule
-      })
-    }).catch(err => {
-      console.log(err)
-      response.status(500).send(err)
-    })
-})
+//       response.send({
+//         response: { code: 200, message: 'berhasil' }, data: confirmationData
+//       })
+//     }).catch(err => {
+//       console.log(err)
+//       response.status(500).send(err)
+//     })
+// })
 
 exports.getProgressPage = functions.https.onRequest((request, response) => {
   const body = request.body
