@@ -7,7 +7,8 @@ const functions = require('firebase-functions')
 
 var admin = require('firebase-admin')
 
-var serviceAccount = require('../salescampaignkl-firebase-adminsdk-6khq9-755a60ab0e.json')
+// var serviceAccount = require('../salescampaignkl-firebase-adminsdk-6khq9-755a60ab0e.json')
+var serviceAccount = require('./service_key.json')
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -15,30 +16,78 @@ admin.initializeApp({
 })
 
 // SignUp Page Function
+exports.onUserCreated = functions.auth.user().onCreate((user) => {
+  const userUID = user.uid
 
-exports.getChannelList = functions.https.onRequest((request, response) => {
-  const body = request.body
-  const region = body.data.region
-  // const region = body.region
-
-  admin.database().ref(`region/${region}`).on('value', function (snapshot) {
-    const channelList = []
-    snapshot.forEach(function (childSnapshot) {
-      channelList.push({
-        value: childSnapshot.key,
-        label: childSnapshot.val().name
-      })
-    })
-    response.send({
-      response: { code: 200, message: 'berhasil' }, data: channelList
-    })
-  }, function (errorObject) {
-    console.log('The read failed: ' + errorObject.code)
-    response.status(500).send(errorObject)
+  return admin.auth().setCustomUserClaims(userUID, { level: 'sales' }).then(() => {
+    return 'success'
+  }).catch(() => {
+    return 'error'
   })
 })
 
-// Sales Form Function
+// exports.checkAuth = functions.https.onCall((data, context) => {
+//   return getProductUID('R2', 'kls_branch_bandung', 'visit')
+// })
+
+exports.getChannelList = functions.https.onCall((data, context) => {
+  const region = data.region
+
+  // Realtime database return must be from resolve promise due to heap stack
+  return new Promise((resolve, reject) => {
+    admin.database().ref(`region/${region}`).on('value', (snapshot) => {
+      const channelList = []
+      snapshot.forEach((childSnapshot) => {
+        channelList.push({
+          value: childSnapshot.key,
+          label: childSnapshot.val().channel_name
+        })
+      })
+      // return List of Channel
+      return resolve(channelList)
+    }, (errorObject) => {
+      throw new functions.https.HttpsError('invalid-argument', 'The function failed to be processed')
+    })
+  })
+})
+
+exports.getAvailableProductHandler = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
+
+  const uid = context.auth.uid
+  return admin.firestore().collection('user_data').doc(uid).get()
+    .then(val => {
+      const region = val.data().region
+      const channel = val.data().channel
+      return new Promise((resolve, reject) => {
+        admin.database().ref(`region/${region}/${channel}`).on('value', (snapshot) => {
+          const value = snapshot.val()
+          const availableConType = []
+          if (value.conference_call.product_uid !== '') {
+            availableConType.push({
+              conversation_type: 'Conference Call',
+              product_handler: value.conference_call.product_name
+            })
+          }
+          if (value.visit.product_uid !== '') {
+            availableConType.push({
+              conversation_type: 'Visit',
+              product_handler: value.visit.product_name
+            })
+          }
+          return resolve(availableConType)
+        }, function (errorObject) {
+          throw new functions.https.HttpsError('invalid-argument', 'The function failed to be processed')
+        })
+      })
+    }).catch(() => {
+      throw new functions.https.HttpsError('invalid-argument', 'The function failed to be processed')
+    })
+})
 
 exports.addNewForm = functions.https.onCall((data, context) => {
   if (!context.auth) {
@@ -49,12 +98,12 @@ exports.addNewForm = functions.https.onCall((data, context) => {
 
   const uid = context.auth.uid
   const inputData = data.input_data
-
+  let productUID = ''
   // ISO Date Submit time (Server)
   const submitTime = new Date(Date.now())
 
   return admin.firestore().collection('user_data').doc(uid).get()
-    .then(salesDataCollection => {
+    .then(async salesDataCollection => {
       const salesDataValue = salesDataCollection.data()
       // get val 1 by 1
       const salesName = salesDataValue.name
@@ -62,8 +111,9 @@ exports.addNewForm = functions.https.onCall((data, context) => {
       const salesRegion = salesDataValue.region
       const salesChannel = salesDataValue.channel
 
-      const generateId = `${submitTime.getTime()}${salesNIP}`
+      productUID = await getProductUID(salesRegion, salesChannel, inputData.conversation_type)
 
+      const generateId = `${submitTime.getTime()}${salesNIP}`
       const bookingForm = {
         ...inputData,
         _id: generateId,
@@ -72,14 +122,16 @@ exports.addNewForm = functions.https.onCall((data, context) => {
         created_at: submitTime,
         verified: 'waiting',
         executed: 'waiting',
+        postpone_status: false,
         sales_name: salesName,
         sales_region: salesRegion,
-        sales_channel: salesChannel
+        sales_channel: salesChannel,
+        product_uid: productUID
       }
       return admin.firestore().collection('user_data').doc(`${uid}/schedule/${generateId}`).set(bookingForm)
     })
     .then(() => {
-      return testMessage(messageList('new'))
+      return FCMHandler(productUID, getMessageData('new'))
     }).then(() => {
       return 'Add Form Success'
     })
@@ -89,6 +141,25 @@ exports.addNewForm = functions.https.onCall((data, context) => {
       throw new functions.https.HttpsError('invalid-argument', 'the function error')
     })
 })
+
+const getProductUID = (region, channel, conversationType) => {
+  // Realtime database return must be from resolve promise due to heap stack
+  let conType = ''
+  if (conversationType === 'Visit') {
+    conType = 'visit'
+  } else if (conversationType === 'Conference Call') {
+    conType = 'conference_call'
+  }
+
+  return new Promise((resolve, reject) => {
+    admin.database().ref(`region/${region}/${channel}/${conType}`).once('value', (snapshot) => {
+      const productUID = snapshot.val().product_uid
+      return resolve(productUID)
+    }, (errorObject) => {
+      throw new functions.https.HttpsError('invalid-argument', 'The function failed to be processed')
+    })
+  })
+}
 
 exports.getSalesFormRequest = functions.https.onCall((data, context) => {
   if (!context.auth) {
@@ -115,7 +186,8 @@ exports.getSalesFormRequest = functions.https.onCall((data, context) => {
           start_time: data.start_time.toDate().toISOString(),
           end_time: data.end_time.toDate().toISOString(),
           verified: data.verified,
-          executed: data.executed
+          executed: data.executed,
+          postpone_status: data.postpone_status
         })
       })
       return salesSchedule
@@ -126,6 +198,11 @@ exports.getSalesFormRequest = functions.https.onCall((data, context) => {
 })
 
 exports.getFormDetail = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
   const formId = data.formId
 
   return admin.firestore().collectionGroup('schedule').where('_id', '==', formId).get()
@@ -141,6 +218,7 @@ exports.getFormDetail = functions.https.onCall((data, context) => {
             end_time: documentSnapshot.data().end_time.toDate().toISOString()
           }
         })
+        delete formDetailResponse.product_uid
         return formDetailResponse
       }
     }).catch((error) => {
@@ -149,19 +227,18 @@ exports.getFormDetail = functions.https.onCall((data, context) => {
     })
 })
 
-// on progress
+// Product Form Backend Function
 
 exports.getWaitingForm = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
   const uid = context.auth.uid
 
-  return admin.firestore().collection('user_data').doc(uid).get()
-    .then(documentSnapshot => {
-      // (documentSnapshot.data().name)
-      const productname = documentSnapshot.data().name
-
-      return admin.firestore().collectionGroup('schedule')
-        .where('producthandler', '==', productname).where('isverified', '==', 'waiting').orderBy('start').get()
-    })
+  return admin.firestore().collectionGroup('schedule')
+    .where('product_uid', '==', uid).where('verified', '==', 'waiting').orderBy('start_time').get()
     .then(querySnapshot => {
       const confirmationData = []
 
@@ -177,7 +254,8 @@ exports.getWaitingForm = functions.https.onCall((data, context) => {
           start_time: data.start_time.toDate().toISOString(),
           end_time: data.end_time.toDate().toISOString(),
           verified: data.verified,
-          executed: data.executed
+          executed: data.executed,
+          postpone_status: data.postpone_status
         })
       })
 
@@ -188,198 +266,91 @@ exports.getWaitingForm = functions.https.onCall((data, context) => {
     })
 })
 
-// exports.getWaitingForm = functions.https.onRequest((request, response) => {
-//   const body = request.body
+exports.getProgressPage = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
+  const uid = context.auth.uid
 
-//   const uid = body.data.useruid
-
-//   admin.firestore().collection('user-data').doc(uid).get()
-//     .then(documentSnapshot => {
-//       // (documentSnapshot.data().name)
-//       const productname = documentSnapshot.data().name
-
-//       return admin.firestore().collectionGroup('schedule')
-//         .where('producthandler', '==', productname).where('isverified', '==', 'waiting').orderBy('start').get()
-//     })
-//     .then(querySnapshot => {
-//       const confirmationData = []
-
-//       querySnapshot.forEach(documentSnapshot => {
-//         const data = documentSnapshot.data()
-//         confirmationData.push({
-//           salesname: data.salesname,
-//           customername: data.customername,
-//           customeremail: data.customeremail,
-//           customerhandphone: data.customerhandphone,
-//           id: data.id,
-//           start: data.start.toDate(),
-//           end: data.end.toDate()
-//         })
-//       })
-
-//       response.send({
-//         response: { code: 200, message: 'berhasil' }, data: confirmationData
-//       })
-//     }).catch(err => {
-//       console.log(err)
-//       response.status(500).send(err)
-//     })
-// })
-
-exports.getProgressPage = functions.https.onRequest((request, response) => {
-  const body = request.body
-
-  const uid = body.data.useruid
-
-  admin.firestore().collection('user-data').doc(uid).get()
-    .then(documentSnapshot => {
-      // (documentSnapshot.data().name)
-      const productname = documentSnapshot.data().name
-
-      return admin.firestore().collectionGroup('schedule')
-        .where('producthandler', '==', productname).where('isverified', '==', 'accepted').where('isexecuted', '==', 'waiting').orderBy('start').get()
-    })
+  return admin.firestore().collectionGroup('schedule')
+    .where('product_uid', '==', uid).where('verified', '==', 'verified').where('executed', '==', 'waiting').orderBy('start_time').get()
     .then(querySnapshot => {
-      const confirmationData = []
+      const executedData = []
 
       querySnapshot.forEach(documentSnapshot => {
         const data = documentSnapshot.data()
-        confirmationData.push({
-          salesname: data.salesname,
-          customername: data.customername,
-          customeremail: data.customeremail,
-          customerhandphone: data.customerhandphone,
-          id: data.id,
-          start: data.start.toDate(),
-          end: data.end.toDate(),
-          isexecuted: data.isexecuted
+        executedData.push({
+          company_name: data.company_name,
+          sales_name: data.sales_name,
+          customer_name: data.customer_name,
+          customer_email: data.customer_email,
+          customer_handphone: data.customer_handphone,
+          _id: data._id,
+          start_time: data.start_time.toDate().toISOString(),
+          end_time: data.end_time.toDate().toISOString(),
+          verified: data.verified,
+          executed: data.executed,
+          postpone_status: data.postpone_status
         })
       })
-
-      response.send({
-        response: { code: 200, message: 'berhasil' }, data: confirmationData
-      })
+      console.log(executedData)
+      return executedData
     }).catch(err => {
       console.log(err)
-      response.status(500).send(err)
+      throw new functions.https.HttpsError('invalid-argument', 'the function error')
     })
-})
-
-exports.getAvailableProductHandler = functions.https.onRequest((request, response) => {
-  const body = request.body
-
-  const uid = body.data.useruid
-
-  admin.firestore().collection('user-data').doc(uid).get()
-    .then(val => {
-      const region = val.data().region
-      const channel = val.data().channel
-
-      admin.database().ref(`region/${region}/${channel}`).on('value', function (snapshot) {
-        console.log(snapshot.val())
-        const value = snapshot.val()
-        const contype = []
-
-        if (value.concall !== '') {
-          contype.push({
-            conversationtype: 'Conference Call',
-            producthandler: value.concall
-          })
-        }
-        if (value.visit !== '') {
-          contype.push({
-            conversationtype: 'Visit',
-            producthandler: value.visit
-          })
-        }
-        console.log(contype)
-        response.send({
-          response: { code: 200, message: 'berhasil' }, data: contype
-        })
-      }, function (errorObject) {
-        console.log('The read failed: ' + errorObject.code)
-        response.status(500).send(errorObject)
-      })
-    }).catch(error => {
-      console.log(error)
-      response.status(500).send(error)
-    })
-})
-
-exports.test = functions.https.onCall(async (data, context) => {
-  const region = data.region
-  console.log(context.auth.uid)
-  console.log(context)
-
-  return new Promise((resolve, reject) => {
-    admin.database().ref(`region/${region}`).once('value', (snapshot) => {
-    // return ref.once('value', function (snapshot) {
-      const channelList = []
-      snapshot.forEach(function (childSnapshot) {
-        channelList.push({
-          value: childSnapshot.key,
-          label: childSnapshot.val().name
-        })
-      })
-      return resolve({
-        response: { code: 200, message: 'berhasil' }, data: channelList
-      })
-    }, function (errorObject) {
-      reject(errorObject)
-      console.log('The read failed: ' + errorObject.code)
-      throw new functions.https.HttpsError('invalid-argument', 'The function must be called with ' +
-    'one arguments "text" containing the message text to add.')
-    })
-  })
 })
 
 // Firebase firestore Function
 
-exports.changeOnForm = functions.firestore.document('user-data/{userId}/schedule/{formId}').onUpdate((change, context) => {
+exports.changeOnForm = functions.firestore.document('user_data/{userId}/schedule/{formId}').onUpdate((change, context) => {
   const oldVal = change.before.data()
   const newVal = change.after.data()
 
   // const test = change.after.ref.path // path declaration
   const useruid = context.params.userId
+  console.log(context)
 
-  if (oldVal.isverified === 'waiting' && newVal.isverified === 'accepted') {
+  if (oldVal.verified === 'waiting' && newVal.verified === 'verified') {
     let point
-    if (newVal.isexecuted !== 'postpone') {
-      if (newVal.conversationtype === 'Visit') {
-        admin.firestore().collection('user-data').doc(`${useruid}`).update({ point: admin.firestore.FieldValue.increment(10) })
+    if (!newVal.postpone_status) {
+      if (newVal.conversation_type === 'Visit') {
+        admin.firestore().collection('user_data').doc(`${useruid}`).update({ point: admin.firestore.FieldValue.increment(10) })
         point = 10
-      } else if (newVal.conversationtype === 'Conference Call') {
-        admin.firestore().collection('user-data').doc(`${useruid}`).update({ point: admin.firestore.FieldValue.increment(5) })
+      } else if (newVal.conversation_type === 'Conference Call') {
+        admin.firestore().collection('user_data').doc(`${useruid}`).update({ point: admin.firestore.FieldValue.increment(5) })
         point = 5
       }
-      return testMessage(messageList('accepted', point))
+      return FCMHandler(useruid, getMessageData('accepted', point))
     } else {
-      return testMessage({
+      return FCMHandler(useruid, {
         data: {
           titlemessage: 'Your Request is Accepted!',
           message: 'No Point Because Reschedule'
         }
       })
     }
-  } else if ((oldVal.isexecuted === 'waiting' || oldVal.isexecuted === 'postponed') && newVal.isexecuted === 'done') {
+  } else if (oldVal.executed === 'waiting' && newVal.executed === 'done') {
     let point
-    if (newVal.conversationtype === 'Visit') {
-      admin.firestore().collection('user-data').doc(`${useruid}`).update({ point: admin.firestore.FieldValue.increment(10) })
+    if (newVal.conversation_type === 'Visit') {
+      admin.firestore().collection('user_data').doc(`${useruid}`).update({ point: admin.firestore.FieldValue.increment(10) })
       point = 10
-    } else if (newVal.conversationtype === 'Conference Call') {
-      admin.firestore().collection('user-data').doc(`${useruid}`).update({ point: admin.firestore.FieldValue.increment(5) })
+    } else if (newVal.conversation_type === 'Conference Call') {
+      admin.firestore().collection('user_data').doc(`${useruid}`).update({ point: admin.firestore.FieldValue.increment(5) })
       point = 5
     }
-    return testMessage(messageList('executed', point))
-  } else if (oldVal.isverified === 'waiting' && newVal.isverified === 'canceled') {
-    return testMessage(messageList('canceled'))
-  } else if (oldVal.isverified === 'accepted' && newVal.isverified === 'canceled') {
-    return testMessage(messageList('canceled'))
+    return FCMHandler(useruid, getMessageData('executed', point))
+  } else if (oldVal.verified === 'waiting' && newVal.verified === 'canceled') {
+    return FCMHandler(useruid, getMessageData('canceled'))
+  } else if (oldVal.verified === 'verified' && newVal.verified === 'canceled') {
+    return FCMHandler(useruid, getMessageData('postpone'))
   }
   return null
 })
 
-function messageList (verification, point) {
+function getMessageData (verification, point = 0) {
   let messageData = {}
   if (verification === 'accepted') {
     messageData = {
@@ -420,24 +391,28 @@ function messageList (verification, point) {
   return messageData
 }
 
-async function testMessage (message) {
-  return new Promise((resolve, reject) => {
-    admin.messaging().sendToDevice(
-      ['cHn-gb_kQRWwYsDGYNZ3Iz:APA91bFiwmToaTjBcCpS8iKp2rCQM7ZWOgcRwwTBLcS4WTp20SnlZXunnS2AIvQH7xFhcHj325k8MiYFxAI-74Ay8b8qR1t1nMmIeja7QA7MpvBWcANweuRTgIxQ0PVfLGYvMUhnpV37'], // device fcm tokens...
-      {
-        ...message
-      },
-      {
-        // Required for background/quit data-only messages on Android
-        priority: 'high'
+const FCMHandler = async (userUID, message) => {
+  admin.firestore().collection('user_data').doc(userUID).get().then((documentSnapshot) => {
+    const deviceToken = documentSnapshot.data().device_token
+
+    return new Promise((resolve, reject) => {
+      admin.messaging().sendToDevice(
+        deviceToken,
+        {
+          ...message
+        },
+        {
+          // Required for background/quit data-only messages on Android
+          priority: 'high'
+        }
+      ).then(result => {
+        // console.log('successfully send message', result)
+        resolve(result)
       }
-    ).then(result => {
-      console.log('successfully send message', result)
-      resolve(result)
-    }
-    ).catch(error => {
-      console.log('error happened')
-      reject(error)
+      ).catch(error => {
+        console.log('error happened')
+        reject(error)
+      })
     })
   })
 }
