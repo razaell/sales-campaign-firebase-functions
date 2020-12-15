@@ -30,18 +30,20 @@ exports.onUserCreated = functions.auth.user().onCreate((user) => {
 //   return getProductUID('R2', 'kls_branch_bandung', 'visit')
 // })
 
-exports.getChannelList = functions.https.onCall((data, context) => {
-  const region = data.region
-
+exports.getRegionListData = functions.https.onCall((data, context) => {
   // Realtime database return must be from resolve promise due to heap stack
   return new Promise((resolve, reject) => {
-    admin.database().ref(`region/${region}`).on('value', (snapshot) => {
-      const channelList = []
+    admin.database().ref('region').on('value', (snapshot) => {
+      const channelList = {}
+
       snapshot.forEach((childSnapshot) => {
-        channelList.push({
-          value: childSnapshot.key,
-          label: childSnapshot.val().channel_name
-        })
+        const key = childSnapshot.key
+        const data = []
+        for (const [key, value] of Object.entries(childSnapshot.val())) {
+          data.push({ value: key, label: value.channel_name })
+        }
+        // channelList[key] = [...data]
+        channelList[key] = [...data]
       })
       // return List of Channel
       return resolve(channelList)
@@ -99,6 +101,7 @@ exports.addNewForm = functions.https.onCall((data, context) => {
   const uid = context.auth.uid
   const inputData = data.input_data
   let productUID = ''
+  let productPhoneNumber = ''
   // ISO Date Submit time (Server)
   const submitTime = new Date(Date.now())
 
@@ -110,8 +113,10 @@ exports.addNewForm = functions.https.onCall((data, context) => {
       const salesNIP = salesDataValue.nip
       const salesRegion = salesDataValue.region
       const salesChannel = salesDataValue.channel
+      const salesPhoneNumber = salesDataValue.phone_number
 
       productUID = await getProductUID(salesRegion, salesChannel, inputData.conversation_type)
+      productPhoneNumber = await getProductPhoneNumber(productUID)
 
       const generateId = `${submitTime.getTime()}${salesNIP}`
       const bookingForm = {
@@ -126,7 +131,9 @@ exports.addNewForm = functions.https.onCall((data, context) => {
         sales_name: salesName,
         sales_region: salesRegion,
         sales_channel: salesChannel,
-        product_uid: productUID
+        product_uid: productUID,
+        sales_phone_number: salesPhoneNumber,
+        product_handler_phone_number: productPhoneNumber
       }
       return admin.firestore().collection('user_data').doc(`${uid}/schedule/${generateId}`).set(bookingForm)
     })
@@ -161,6 +168,18 @@ const getProductUID = (region, channel, conversationType) => {
   })
 }
 
+const getProductPhoneNumber = (uid) => {
+  // Realtime database return must be from resolve promise due to heap stack
+  return new Promise((resolve, reject) => {
+    return admin.firestore().collection('user_data').doc(uid).get()
+      .then(documentSnapshot => {
+        console.log(documentSnapshot.data())
+        resolve(documentSnapshot.data().phone_number)
+      })
+      .catch((error) => { reject(error) })
+  })
+}
+
 exports.getSalesFormRequest = functions.https.onCall((data, context) => {
   if (!context.auth) {
     // Throwing an HttpsError so that the client gets the error details.
@@ -179,7 +198,7 @@ exports.getSalesFormRequest = functions.https.onCall((data, context) => {
           sales_name: data.sales_name,
           customer_name: data.customer_name,
           customer_email: data.customer_email,
-          customer_handphone: data.customer_handphone,
+          customer_phone_number: data.customer_phone_number,
           conversation_type: data.conversation_type,
           _id: data._id,
           // time convert to string due to unknown on frontend
@@ -191,6 +210,43 @@ exports.getSalesFormRequest = functions.https.onCall((data, context) => {
         })
       })
       return salesSchedule
+    }).catch(error => {
+      console.log(error)
+      throw new functions.https.HttpsError('invalid-argument', 'the function error')
+    })
+})
+
+exports.getCanceledForm = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
+  const uid = context.auth.uid
+
+  return admin.firestore().doc(`user_data/${uid}`).collection('schedule').where('verified', '==', 'canceled').orderBy('start_time').get()
+    .then(querySnapshot => {
+      const canceledSchedule = []
+
+      querySnapshot.forEach(documentSnapshot => {
+        const data = documentSnapshot.data()
+        canceledSchedule.push({
+          company_name: data.company_name,
+          product_handler: data.product_handler,
+          sales_region: data.sales_region,
+          sales_channel: data.sales_channel,
+          product_handler_phone_number: data.product_handler_phone_number,
+          conversation_type: data.conversation_type,
+          product_category: data.product_category,
+          _id: data._id,
+          start_time: data.start_time.toDate().toISOString(),
+          end_time: data.end_time.toDate().toISOString(),
+          verified: data.verified,
+          executed: data.executed,
+          postpone_status: data.postpone_status
+        })
+      })
+      return canceledSchedule
     }).catch(error => {
       console.log(error)
       throw new functions.https.HttpsError('invalid-argument', 'the function error')
@@ -247,9 +303,11 @@ exports.getWaitingForm = functions.https.onCall((data, context) => {
         confirmationData.push({
           company_name: data.company_name,
           sales_name: data.sales_name,
-          customer_name: data.customer_name,
-          customer_email: data.customer_email,
-          customer_handphone: data.customer_handphone,
+          sales_region: data.sales_region,
+          sales_channel: data.sales_channel,
+          sales_phone_number: data.sales_phone_number,
+          conversation_type: data.conversation_type,
+          product_category: data.product_category,
           _id: data._id,
           start_time: data.start_time.toDate().toISOString(),
           end_time: data.end_time.toDate().toISOString(),
@@ -266,6 +324,7 @@ exports.getWaitingForm = functions.https.onCall((data, context) => {
     })
 })
 
+// Execution form
 exports.getProgressPage = functions.https.onCall((data, context) => {
   if (!context.auth) {
     // Throwing an HttpsError so that the client gets the error details.
@@ -284,9 +343,11 @@ exports.getProgressPage = functions.https.onCall((data, context) => {
         executedData.push({
           company_name: data.company_name,
           sales_name: data.sales_name,
-          customer_name: data.customer_name,
-          customer_email: data.customer_email,
-          customer_handphone: data.customer_handphone,
+          sales_region: data.sales_region,
+          sales_channel: data.sales_channel,
+          sales_phone_number: data.sales_phone_number,
+          conversation_type: data.conversation_type,
+          product_category: data.product_category,
           _id: data._id,
           start_time: data.start_time.toDate().toISOString(),
           end_time: data.end_time.toDate().toISOString(),
@@ -295,7 +356,7 @@ exports.getProgressPage = functions.https.onCall((data, context) => {
           postpone_status: data.postpone_status
         })
       })
-      console.log(executedData)
+      // console.log(executedData)
       return executedData
     }).catch(err => {
       console.log(err)
@@ -393,26 +454,29 @@ function getMessageData (verification, point = 0) {
 
 const FCMHandler = async (userUID, message) => {
   admin.firestore().collection('user_data').doc(userUID).get().then((documentSnapshot) => {
-    const deviceToken = documentSnapshot.data().device_token
-
-    return new Promise((resolve, reject) => {
-      admin.messaging().sendToDevice(
-        deviceToken,
-        {
-          ...message
-        },
-        {
+    const deviceToken = [...documentSnapshot.data().device_token]
+    if (deviceToken.length === 0) {
+      return null
+    } else {
+      return new Promise((resolve, reject) => {
+        admin.messaging().sendToDevice(
+          deviceToken,
+          {
+            ...message
+          },
+          {
           // Required for background/quit data-only messages on Android
-          priority: 'high'
-        }
-      ).then(result => {
+            priority: 'high'
+          }
+        ).then(result => {
         // console.log('successfully send message', result)
-        resolve(result)
-      }
-      ).catch(error => {
-        console.log('error happened')
-        reject(error)
+          resolve(result)
+        }
+        ).catch(error => {
+          console.log('error happened')
+          reject(error)
+        })
       })
-    })
+    }
   })
 }
