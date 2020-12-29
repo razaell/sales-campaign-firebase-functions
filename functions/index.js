@@ -173,14 +173,14 @@ const getProductPhoneNumber = (uid) => {
   return new Promise((resolve, reject) => {
     return admin.firestore().collection('user_data').doc(uid).get()
       .then(documentSnapshot => {
-        console.log(documentSnapshot.data())
+        // console.log(documentSnapshot.data())
         resolve(documentSnapshot.data().phone_number)
       })
       .catch((error) => { reject(error) })
   })
 }
 
-exports.getSalesFormRequest = functions.https.onCall((data, context) => {
+exports.getSalesSchedule = functions.https.onCall((data, context) => {
   if (!context.auth) {
     // Throwing an HttpsError so that the client gets the error details.
     throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
@@ -188,25 +188,112 @@ exports.getSalesFormRequest = functions.https.onCall((data, context) => {
   }
   const uid = context.auth.uid
 
-  return admin.firestore().doc(`user_data/${uid}`).collection('schedule').orderBy('start_time').get()
+  return admin.firestore().doc(`user_data/${uid}`).collection('schedule').where('verified', '==', 'verified').where('executed', '==', 'waiting').orderBy('end_time').startAt(new Date(Date.now())).get()
     .then(querySnapshot => {
       const salesSchedule = []
 
       querySnapshot.forEach(documentSnapshot => {
         const data = documentSnapshot.data()
         salesSchedule.push({
-          sales_name: data.sales_name,
-          customer_name: data.customer_name,
-          customer_email: data.customer_email,
-          customer_phone_number: data.customer_phone_number,
+          company_name: data.company_name,
+          product_handler: data.product_handler,
+          sales_region: data.sales_region,
+          sales_channel: data.sales_channel,
+          product_handler_phone_number: data.product_handler_phone_number,
           conversation_type: data.conversation_type,
+          product_category: data.product_category,
           _id: data._id,
-          // time convert to string due to unknown on frontend
           start_time: data.start_time.toDate().toISOString(),
           end_time: data.end_time.toDate().toISOString(),
           verified: data.verified,
           executed: data.executed,
           postpone_status: data.postpone_status
+        })
+      })
+      return salesSchedule
+    }).catch(error => {
+      console.log(error)
+      throw new functions.https.HttpsError('invalid-argument', 'the function error')
+    })
+})
+
+exports.getRequestedForm = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
+  const uid = context.auth.uid
+
+  return admin.firestore().doc(`user_data/${uid}`).collection('schedule').where('verified', '==', 'waiting').orderBy('end_time').startAt(new Date(Date.now())).get()
+    .then(querySnapshot => {
+      const salesSchedule = []
+
+      querySnapshot.forEach(documentSnapshot => {
+        const data = documentSnapshot.data()
+        salesSchedule.push({
+          company_name: data.company_name,
+          product_handler: data.product_handler,
+          sales_region: data.sales_region,
+          sales_channel: data.sales_channel,
+          product_handler_phone_number: data.product_handler_phone_number,
+          conversation_type: data.conversation_type,
+          product_category: data.product_category,
+          _id: data._id,
+          start_time: data.start_time.toDate().toISOString(),
+          end_time: data.end_time.toDate().toISOString(),
+          verified: data.verified,
+          executed: data.executed,
+          postpone_status: data.postpone_status
+        })
+      })
+      return salesSchedule
+    }).catch(error => {
+      console.log(error)
+      throw new functions.https.HttpsError('invalid-argument', 'the function error')
+    })
+})
+
+exports.getSalesHistory = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
+  const uid = context.auth.uid
+
+  const startDateFilter = new Date(data.start_date_filter)
+  const endDateFilter = new Date(data.end_date_filter)
+
+  return admin.firestore().doc(`user_data/${uid}`).collection('schedule').orderBy('start_time').startAt(startDateFilter).endAt(endDateFilter).get()
+    .then(querySnapshot => {
+      const salesSchedule = []
+
+      querySnapshot.forEach(documentSnapshot => {
+        const data = documentSnapshot.data()
+        salesSchedule.push({
+
+          company_name: data.company_name,
+          conversation_type: data.conversation_type,
+          _id: data._id,
+          start_time: data.start_time.toDate().toISOString(),
+          end_time: data.end_time.toDate().toISOString(),
+          verified: data.verified,
+          executed: data.executed,
+          postpone_status: data.postpone_status
+
+          // sales_name: data.sales_name,
+          // customer_name: data.customer_name,
+          // customer_email: data.customer_email,
+          // customer_phone_number: data.customer_phone_number,
+          // conversation_type: data.conversation_type,
+          // _id: data._id,
+          // // time convert to string due to unknown on frontend
+          // start_time: data.start_time.toDate().toISOString(),
+          // end_time: data.end_time.toDate().toISOString(),
+          // verified: data.verified,
+          // executed: data.executed,
+          // postpone_status: data.postpone_status
         })
       })
       return salesSchedule
@@ -324,6 +411,46 @@ exports.getWaitingForm = functions.https.onCall((data, context) => {
     })
 })
 
+// Product schedule
+exports.getProductSchedule = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    // Throwing an HttpsError so that the client gets the error details.
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+        'while authenticated.')
+  }
+  const uid = context.auth.uid
+
+  return admin.firestore().collectionGroup('schedule')
+    .where('product_uid', '==', uid).where('verified', '==', 'verified').where('executed', '==', 'waiting').orderBy('end_time').startAt(new Date(Date.now())).get()
+    .then(querySnapshot => {
+      const executedData = []
+
+      querySnapshot.forEach(documentSnapshot => {
+        const data = documentSnapshot.data()
+        executedData.push({
+          company_name: data.company_name,
+          sales_name: data.sales_name,
+          sales_region: data.sales_region,
+          sales_channel: data.sales_channel,
+          sales_phone_number: data.sales_phone_number,
+          conversation_type: data.conversation_type,
+          product_category: data.product_category,
+          _id: data._id,
+          start_time: data.start_time.toDate().toISOString(),
+          end_time: data.end_time.toDate().toISOString(),
+          verified: data.verified,
+          executed: data.executed,
+          postpone_status: data.postpone_status
+        })
+      })
+      // console.log(executedData)
+      return executedData
+    }).catch(err => {
+      console.log(err)
+      throw new functions.https.HttpsError('invalid-argument', 'the function error')
+    })
+})
+
 // Execution form
 exports.getProgressPage = functions.https.onCall((data, context) => {
   if (!context.auth) {
@@ -372,7 +499,7 @@ exports.changeOnForm = functions.firestore.document('user_data/{userId}/schedule
 
   // const test = change.after.ref.path // path declaration
   const useruid = context.params.userId
-  console.log(context)
+  // console.log(context)
 
   if (oldVal.verified === 'waiting' && newVal.verified === 'verified') {
     let point
@@ -389,7 +516,8 @@ exports.changeOnForm = functions.firestore.document('user_data/{userId}/schedule
       return FCMHandler(useruid, {
         data: {
           titlemessage: 'Your Request is Accepted!',
-          message: 'No Point Because Reschedule'
+          message: 'No Point Because Reschedule',
+          notification: 'on'
         }
       })
     }
@@ -417,35 +545,40 @@ function getMessageData (verification, point = 0) {
     messageData = {
       data: {
         titlemessage: 'Your Request is Accepted!',
-        message: `You get ${point} Point`
+        message: `You get ${point} Point`,
+        notification: 'on'
       }
     }
   } else if (verification === 'executed') {
     messageData = {
       data: {
         titlemessage: 'Your arrangement has finished!',
-        message: `You get ${point} Point`
+        message: `You get ${point} Point`,
+        notification: 'on'
       }
     }
   } else if (verification === 'canceled') {
     messageData = {
       data: {
         titlemessage: 'Your Request is Canceled!',
-        message: 'Please Arrange another Schedule'
+        message: 'Please Arrange another Schedule',
+        notification: 'on'
       }
     }
   } else if (verification === 'new') {
     messageData = {
       data: {
         titlemessage: 'New Form',
-        message: 'New Concall/Visit has been arranged by a Sales!'
+        message: 'New Concall/Visit has been arranged by a Sales!',
+        notification: 'on'
       }
     }
   } else if (verification === 'postpone') {
     messageData = {
       data: {
         titlemessage: 'Visit/Concall has been postponed',
-        message: 'Please re-arrange Schedule'
+        message: 'Please re-arrange Schedule',
+        notification: 'on'
       }
     }
   }
@@ -453,6 +586,7 @@ function getMessageData (verification, point = 0) {
 }
 
 const FCMHandler = async (userUID, message) => {
+  console.log('sending Message')
   admin.firestore().collection('user_data').doc(userUID).get().then((documentSnapshot) => {
     const deviceToken = [...documentSnapshot.data().device_token]
     if (deviceToken.length === 0) {
@@ -461,6 +595,7 @@ const FCMHandler = async (userUID, message) => {
       return new Promise((resolve, reject) => {
         admin.messaging().sendToDevice(
           deviceToken,
+          // ['cHn-gb_kQRWwYsDGYNZ3Iz:APA91bFiwmToaTjBcCpS8iKp2rCQM7ZWOgcRwwTBLcS4WTp20SnlZXunnS2AIvQH7xFhcHj325k8MiYFxAI-74Ay8b8qR1t1nMmIeja7QA7MpvBWcANweuRTgIxQ0PVfLGYvMUhnpV37'],
           {
             ...message
           },

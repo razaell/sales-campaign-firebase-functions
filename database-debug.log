@@ -1,14 +1,12 @@
-15:30:49.598 [NamespaceSystem-akka.actor.default-dispatcher-5] INFO akka.event.slf4j.Slf4jLogger - Slf4jLogger started
-15:30:50.055 [main] INFO com.firebase.server.forge.App$ - Listening at localhost:9000
-22:27:28.372 [NamespaceSystem-akka.actor.default-dispatcher-9] WARN com.firebase.server.forge.App$ - Received service account token ya29...q1AY, assuming ownership.
-22:27:53.979 [NamespaceSystem-akka.actor.default-dispatcher-9] WARN com.firebase.server.forge.App$ - Received service account token ya29...cNiU, assuming ownership.
-23:22:27.075 [NamespaceSystem-akka.actor.default-dispatcher-15] WARN com.firebase.server.forge.App$ - Received service account token ya29...9Kh0, assuming ownership.
-23:22:53.040 [NamespaceSystem-akka.actor.default-dispatcher-15] WARN com.firebase.server.forge.App$ - Received service account token ya29...Xq0s, assuming ownership.
-00:17:26.152 [NamespaceSystem-akka.actor.default-dispatcher-20] WARN com.firebase.server.forge.App$ - Received service account token ya29...3K58, assuming ownership.
-00:17:52.112 [NamespaceSystem-akka.actor.default-dispatcher-22] WARN com.firebase.server.forge.App$ - Received service account token ya29...q-So, assuming ownership.
-00:27:51.469 [NamespaceSystem-akka.actor.default-dispatcher-24] WARN com.firebase.server.forge.App$ - Received service account token ya29...lQas, assuming ownership.
-00:34:36.224 [Thread-1] INFO com.firebase.server.forge.App$ - Attempting graceful shutdown.
-00:34:36.305 [NamespaceSystem-akka.actor.default-dispatcher-31] INFO com.firebase.core.namespace.Terminator$Terminator - 1 actors left to terminate: salescampaignkl
-00:34:36.320 [NamespaceSystem-akka.actor.default-dispatcher-27] INFO com.firebase.core.namespace.NamespaceActor - Stopping namespace actor for salescampaignkl
-00:34:36.332 [NamespaceSystem-akka.actor.default-dispatcher-27] INFO com.firebase.core.namespace.NamespaceActor - Gauges removed for salescampaignkl
-00:34:36.345 [Thread-1] INFO com.firebase.server.forge.App$ - Graceful shutdown complete.
+15:50:25.253 [NamespaceSystem-akka.actor.default-dispatcher-5] INFO akka.event.slf4j.Slf4jLogger - Slf4jLogger started
+15:50:25.807 [main] INFO com.firebase.server.forge.App$ - Listening at localhost:9000
+16:04:34.597 [NamespaceSystem-akka.actor.default-dispatcher-7] WARN com.firebase.server.forge.App$ - Received service account token ya29...FF98, assuming ownership.
+16:05:37.854 [NamespaceSystem-akka.actor.default-dispatcher-10] WARN com.firebase.server.forge.App$ - Received service account token ya29...M_nM, assuming ownership.
+16:06:11.196 [NamespaceSystem-akka.actor.default-dispatcher-12] WARN com.firebase.server.forge.App$ - Received service account token ya29...T_S0, assuming ownership.
+16:33:54.620 [NamespaceSystem-akka.actor.default-dispatcher-25] WARN com.firebase.server.forge.App$ - Received service account token ya29...Ksco, assuming ownership.
+16:34:18.657 [NamespaceSystem-akka.actor.default-dispatcher-26] WARN com.firebase.server.forge.App$ - Received service account token ya29...45RQ, assuming ownership.
+16:34:26.466 [Thread-1] INFO com.firebase.server.forge.App$ - Attempting graceful shutdown.
+16:34:26.475 [NamespaceSystem-akka.actor.default-dispatcher-26] INFO com.firebase.core.namespace.Terminator$Terminator - 1 actors left to terminate: salescampaignkl
+16:34:26.479 [NamespaceSystem-akka.actor.default-dispatcher-27] INFO com.firebase.core.namespace.NamespaceActor - Stopping namespace actor for salescampaignkl
+16:34:26.480 [NamespaceSystem-akka.actor.default-dispatcher-27] INFO com.firebase.core.namespace.NamespaceActor - Gauges removed for salescampaignkl
+16:34:26.483 [Thread-1] INFO com.firebase.server.forge.App$ - Graceful shutdown complete.
